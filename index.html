@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Egg Ledger — shared carton, split fairly</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#E7ECE4;
+    --bg-warm:#F4F2E8;
+    --card:#FFFFFF;
+    --ink:#1E2A20;
+    --ink-soft:#5B6A5D;
+    --line:#CBD3C4;
+    --yolk:#E3A22B;
+    --yolk-deep:#B97D14;
+    --sage:#4C7A5D;
+    --brick:#B04A38;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', sans-serif;
+    line-height:1.5;
+  }
+  h1,h2,h3{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    margin:0 0 .3em 0;
+    letter-spacing:-0.01em;
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:28px 20px 80px;}
+
+  /* ---- Hero ---- */
+  .hero{
+    display:grid;
+    grid-template-columns:1.1fr 1fr;
+    gap:32px;
+    align-items:center;
+    padding:36px 8px 44px;
+  }
+  @media (max-width:720px){ .hero{grid-template-columns:1fr; padding-top:20px;} }
+  .hero h1{font-size:clamp(32px,5vw,46px); line-height:1.05;}
+  .hero p{color:var(--ink-soft); font-size:16px; max-width:42ch;}
+  .stat-row{display:flex; gap:28px; margin-top:22px; flex-wrap:wrap;}
+  .stat{}
+  .stat .num{font-family:'IBM Plex Mono', monospace; font-size:26px; font-weight:600;}
+  .stat .lbl{font-size:13px; color:var(--ink-soft);}
+
+  .carton{
+    background:var(--bg-warm);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:22px;
+  }
+  .carton-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:9px;
+  }
+  .cell{
+    aspect-ratio:1/1.15;
+    border-radius:50% 50% 46% 46%;
+    border:1.5px dashed var(--line);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+  }
+  .cell.filled{
+    background:radial-gradient(circle at 35% 30%, #FBEBC7, var(--yolk) 78%);
+    border:1.5px solid var(--yolk-deep);
+  }
+  .carton-cap{text-align:center; font-size:13px; color:var(--ink-soft); margin-top:14px;}
+
+  /* ---- Sections ---- */
+  section{margin-top:10px;}
+  .panel-title{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;}
+  .panel-title h2{font-size:22px;}
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  @media (max-width:720px){ .grid-2{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:22px;
+  }
+  .card h3{font-size:17px; margin-bottom:16px;}
+  label{display:block; font-size:13px; color:var(--ink-soft); margin:12px 0 5px;}
+  label:first-of-type{margin-top:0;}
+  select, input[type=number], input[type=text]{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid var(--line);
+    border-radius:9px;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:15px;
+    background:var(--bg-warm);
+    color:var(--ink);
+  }
+  select:focus, input:focus{outline:2px solid var(--yolk); outline-offset:1px;}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  button{
+    margin-top:18px;
+    width:100%;
+    padding:12px 16px;
+    border:none;
+    border-radius:9px;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:15px;
+    font-weight:600;
+    cursor:pointer;
+    transition:transform .08s ease;
+  }
+  button:active{transform:scale(.98);}
+  .btn-buy{background:var(--sage); color:#fff;}
+  .btn-use{background:var(--yolk); color:#3A2600;}
+  .btn-ghost{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ink);
+    width:auto;
+    margin-top:0;
+    padding:9px 14px;
+    font-weight:500;
+    font-size:13.5px;
+  }
+  .msg{font-size:13.5px; margin-top:10px; min-height:18px;}
+  .msg.err{color:var(--brick);}
+  .msg.ok{color:var(--sage);}
+
+  table{width:100%; border-collapse:collapse; font-size:14.5px;}
+  th{
+    text-align:left;
+    font-weight:500;
+    color:var(--ink-soft);
+    font-size:12.5px;
+    padding:0 10px 8px;
+    border-bottom:1px solid var(--line);
+  }
+  td{padding:9px 10px; border-bottom:1px solid var(--line); font-family:'IBM Plex Mono', monospace; font-size:13.5px;}
+  td.name{font-family:'IBM Plex Sans', sans-serif; font-size:14.5px;}
+  tbody tr:last-child td{border-bottom:none;}
+  .tbl-wrap{overflow-x:auto; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:6px 16px;}
+
+  .balances{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;}
+  .bal-card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px;
+  }
+  .bal-card .who{font-family:'Fraunces', serif; font-size:17px; font-weight:600;}
+  .bal-card .amt{font-family:'IBM Plex Mono', monospace; font-size:20px; margin-top:6px;}
+  .amt.pos{color:var(--sage);}
+  .amt.neg{color:var(--brick);}
+  .amt.zero{color:var(--ink-soft);}
+  .bal-card .sub{font-size:12px; color:var(--ink-soft); margin-top:2px;}
+
+  .io-row{display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;}
+  footer{margin-top:56px; padding-top:20px; border-top:1px solid var(--line); font-size:13px; color:var(--ink-soft);}
+  .empty{color:var(--ink-soft); font-size:14px; padding:14px 4px;}
+
+  /* ---- Modal ---- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(30,42,32,.45);
+    display:none; align-items:center; justify-content:center; padding:20px; z-index:50;
+  }
+  .overlay.open{display:flex;}
+  .modal{
+    background:var(--card); border-radius:var(--radius); border:1px solid var(--line);
+    padding:24px; width:100%; max-width:420px;
+  }
+  .modal h3{margin-bottom:14px;}
+  .name-field{display:flex; gap:8px; margin-bottom:8px; align-items:center;}
+  .name-field input{flex:1;}
+  .name-field button{
+    width:auto; margin:0; padding:8px 10px; background:transparent; border:1px solid var(--line); color:var(--brick); font-weight:600;
+  }
+  .modal-actions{display:flex; gap:10px; margin-top:16px;}
+  .modal-actions button{margin:0;}
+  .btn-secondary{background:var(--bg-warm); color:var(--ink); border:1px solid var(--line);}
+  .add-name-link{background:none; border:none; color:var(--sage); font-weight:600; padding:6px 0; margin:4px 0 0; width:auto; cursor:pointer; font-size:14px;}
+
+  .confirm-bar{
+    display:none; align-items:center; gap:10px; background:var(--bg-warm);
+    border:1px solid var(--line); border-radius:9px; padding:10px 14px; margin-top:10px; font-size:14px;
+  }
+  .confirm-bar.open{display:flex;}
+  .confirm-bar button{width:auto; margin:0; padding:7px 14px; font-size:13.5px;}
+
+  .toast{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:11px 18px; border-radius:9px; font-size:14px;
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:60;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div>
+      <h1>The egg carton, kept honest.</h1>
+      <p>Five flatmates, one running stock of eggs. Whoever restocks pays that batch's price — whoever eats, eats the oldest eggs first, at whatever they cost.</p>
+      <div class="stat-row">
+        <div class="stat"><div class="num" id="statEggs">0</div><div class="lbl">eggs in stock</div></div>
+        <div class="stat"><div class="num" id="statValue">₹0</div><div class="lbl">stock value</div></div>
+        <div class="stat"><div class="num" id="statTxns">0</div><div class="lbl">entries logged</div></div>
+      </div>
+    </div>
+    <div class="carton">
+      <div class="carton-grid" id="cartonGrid"></div>
+      <div class="carton-cap" id="cartonCap">0 eggs on hand</div>
+    </div>
+  </div>
+
+  <section class="grid-2">
+    <div class="card">
+      <h3>Log a purchase</h3>
+      <label for="buyPerson">Bought by</label>
+      <select id="buyPerson"></select>
+      <div class="row2">
+        <div>
+          <label for="buyQty">Eggs bought</label>
+          <input type="number" id="buyQty" min="1" step="1" placeholder="10">
+        </div>
+        <div>
+          <label for="buyPrice">Total paid (₹)</label>
+          <input type="number" id="buyPrice" min="0" step="0.01" placeholder="80">
+        </div>
+      </div>
+      <button class="btn-buy" onclick="handleBuy()">Add to stock</button>
+      <div class="msg" id="buyMsg"></div>
+    </div>
+
+    <div class="card">
+      <h3>Log usage</h3>
+      <label for="usePerson">Used by</label>
+      <select id="usePerson"></select>
+      <label for="useQty">Eggs used</label>
+      <input type="number" id="useQty" min="1" step="1" placeholder="8">
+      <button class="btn-use" onclick="handleUse()">Deduct from stock</button>
+      <div class="msg" id="useMsg"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="panel-title"><h2>Batches still in stock</h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Bought by</th><th>Left</th><th>₹ / egg</th><th>Batch total</th></tr></thead>
+        <tbody id="stockBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="panel-title"><h2>Who's owed, who owes</h2></div>
+    <div class="balances" id="balances"></div>
+    <p style="font-size:13px;color:var(--ink-soft);margin-top:10px;">Positive means the room owes them; negative means they owe the room. Settle up in cash or transfer, then it evens out over the next carton.</p>
+  </section>
+
+  <section>
+    <div class="panel-title">
+      <h2>Full ledger</h2>
+      <div class="io-row">
+        <button class="btn-ghost" onclick="exportExcel()">Export .xlsx</button>
+        <label class="btn-ghost" style="cursor:pointer;">Import .xlsx
+          <input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="importExcel(event)">
+        </label>
+        <button class="btn-ghost" onclick="openNamesModal()">Edit names</button>
+        <button class="btn-ghost" onclick="toggleResetConfirm(true)">Reset everything</button>
+      </div>
+      <div class="confirm-bar" id="resetConfirm">
+        <span>Clear all purchases, usage and balances?</span>
+        <button class="btn-secondary" onclick="toggleResetConfirm(false)">Cancel</button>
+        <button style="background:var(--brick); color:#fff;" onclick="resetAll()">Yes, reset</button>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Type</th><th>Person</th><th>Eggs</th><th>Amount</th><th>Detail</th></tr></thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    Stored in this browser automatically. Use <strong>Export .xlsx</strong> to keep a backup or move the ledger to another device — <strong>Import .xlsx</strong> loads it back.
+  </footer>
+</div>
+
+<div class="overlay" id="namesOverlay">
+  <div class="modal">
+    <h3>Edit names</h3>
+    <div id="nameFields"></div>
+    <button class="add-name-link" onclick="addNameField()">+ Add another person</button>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeNamesModal()">Cancel</button>
+      <button class="btn-buy" onclick="saveNames()">Save names</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STORAGE_KEY = 'eggLedgerState_v1';
+let state = load();
+
+function load(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return {
+    people: ['Person 1','Person 2','Person 3','Person 4','Person 5'],
+    batches: [],
+    events: [],
+    seq: 1
+  };
+}
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); renderAll(); }
+
+function fmtMoney(n){
+  const r = Math.round(n*100)/100;
+  return '₹' + (Number.isInteger(r) ? r : r.toFixed(2));
+}
+function fmtDate(ts){
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined,{day:'2-digit',month:'short'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+
+function populatePeopleSelects(){
+  ['buyPerson','usePerson'].forEach(id=>{
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = state.people.map(p=>`<option value="${p}">${p}</option>`).join('');
+    if(state.people.includes(prev)) sel.value = prev;
+  });
+}
+
+function handleBuy(){
+  const person = document.getElementById('buyPerson').value;
+  const qty = parseInt(document.getElementById('buyQty').value,10);
+  const total = parseFloat(document.getElementById('buyPrice').value);
+  const msg = document.getElementById('buyMsg');
+  if(!qty || qty<=0 || isNaN(total) || total<0){
+    msg.textContent = 'Enter a valid egg count and amount paid.';
+    msg.className = 'msg err';
+    return;
+  }
+  const pricePerEgg = total/qty;
+  const batch = {
+    id: state.seq++,
+    person, qty, remaining: qty,
+    pricePerEgg, total, ts: Date.now()
+  };
+  state.batches.push(batch);
+  state.events.push({type:'buy', person, qty, amount:total, ts:batch.ts, detail:`${qty} eggs @ ${fmtMoney(pricePerEgg)}/egg`});
+  document.getElementById('buyQty').value='';
+  document.getElementById('buyPrice').value='';
+  msg.textContent = `Added ${qty} eggs at ${fmtMoney(pricePerEgg)} each.`;
+  msg.className = 'msg ok';
+  save();
+}
+
+function handleUse(){
+  const person = document.getElementById('usePerson').value;
+  const qty = parseInt(document.getElementById('useQty').value,10);
+  const msg = document.getElementById('useMsg');
+  if(!qty || qty<=0){
+    msg.textContent = 'Enter how many eggs were used.';
+    msg.className = 'msg err';
+    return;
+  }
+  const available = state.batches.reduce((s,b)=>s+b.remaining,0);
+  if(qty > available){
+    msg.textContent = `Only ${available} eggs left in stock — log a purchase first.`;
+    msg.className = 'msg err';
+    return;
+  }
+  let remainingToDeduct = qty;
+  let totalCost = 0;
+  const breakdownParts = [];
+  const sortedBatches = [...state.batches].filter(b=>b.remaining>0).sort((a,b)=>a.ts-b.ts);
+  for(const b of sortedBatches){
+    if(remainingToDeduct<=0) break;
+    const take = Math.min(b.remaining, remainingToDeduct);
+    b.remaining -= take;
+    const subtotal = take * b.pricePerEgg;
+    totalCost += subtotal;
+    remainingToDeduct -= take;
+    breakdownParts.push(`${take} egg${take>1?'s':''} @ ${fmtMoney(b.pricePerEgg)} (${fmtMoney(subtotal)})`);
+  }
+  state.events.push({type:'use', person, qty, amount:totalCost, ts:Date.now(), detail: breakdownParts.join(' + ')});
+  document.getElementById('useQty').value='';
+  msg.textContent = `${qty} eggs used, costing ${fmtMoney(totalCost)}.`;
+  msg.className = 'msg ok';
+  save();
+}
+
+function computeBalances(){
+  const bal = {};
+  state.people.forEach(p=>bal[p]={paid:0, used:0});
+  state.events.forEach(e=>{
+    if(!bal[e.person]) bal[e.person] = {paid:0, used:0};
+    if(e.type==='buy') bal[e.person].paid += e.amount;
+    else bal[e.person].used += e.amount;
+  });
+  return bal;
+}
+
+function renderCarton(){
+  const total = state.batches.reduce((s,b)=>s+b.remaining,0);
+  const grid = document.getElementById('cartonGrid');
+  const cellsToShow = Math.max(12, Math.ceil(total/12)*12) || 12;
+  const filledCount = total % 12 === 0 && total > 0 ? 12 : total % 12;
+  let html = '';
+  const showFilled = total >= 12 ? 12 : filledCount;
+  for(let i=0;i<12;i++){
+    html += `<div class="cell ${i<showFilled ? 'filled':''}"></div>`;
+  }
+  grid.innerHTML = html;
+  document.getElementById('cartonCap').textContent =
+    total === 0 ? 'Carton empty — someone needs to restock' :
+    total >= 12 ? `${total} eggs on hand (${(total/12).toFixed(1)} cartons)` :
+    `${total} eggs on hand`;
+  document.getElementById('statEggs').textContent = total;
+  document.getElementById('statValue').textContent = fmtMoney(state.batches.reduce((s,b)=>s+b.remaining*b.pricePerEgg,0));
+  document.getElementById('statTxns').textContent = state.events.length;
+}
+
+function renderStock(){
+  const body = document.getElementById('stockBody');
+  const active = state.batches.filter(b=>b.remaining>0).sort((a,b)=>a.ts-b.ts);
+  if(active.length===0){
+    body.innerHTML = `<tr><td colspan="4" class="empty">No eggs in stock right now.</td></tr>`;
+    return;
+  }
+  body.innerHTML = active.map(b=>`
+    <tr>
+      <td class="name">${b.person}</td>
+      <td>${b.remaining}</td>
+      <td>${fmtMoney(b.pricePerEgg)}</td>
+      <td>${fmtMoney(b.remaining*b.pricePerEgg)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderBalances(){
+  const bal = computeBalances();
+  const wrap = document.getElementById('balances');
+  wrap.innerHTML = state.people.map(p=>{
+    const b = bal[p] || {paid:0, used:0};
+    const net = b.paid - b.used;
+    const cls = net > 0.001 ? 'pos' : net < -0.001 ? 'neg' : 'zero';
+    return `
+      <div class="bal-card">
+        <div class="who">${p}</div>
+        <div class="amt ${cls}">${net>=0?'+':'−'}${fmtMoney(Math.abs(net)).replace('₹','₹')}</div>
+        <div class="sub">paid ${fmtMoney(b.paid)} · used ${fmtMoney(b.used)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderLedger(){
+  const body = document.getElementById('ledgerBody');
+  const events = [...state.events].sort((a,b)=>b.ts-a.ts);
+  if(events.length===0){
+    body.innerHTML = `<tr><td colspan="6" class="empty">Nothing logged yet — add a purchase to get started.</td></tr>`;
+    return;
+  }
+  body.innerHTML = events.map(e=>`
+    <tr>
+      <td>${fmtDate(e.ts)}</td>
+      <td>${e.type==='buy' ? 'Bought' : 'Used'}</td>
+      <td class="name">${e.person}</td>
+      <td>${e.qty}</td>
+      <td>${fmtMoney(e.amount)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; font-size:13px; color:var(--ink-soft);">${e.detail}</td>
+    </tr>
+  `).join('');
+}
+
+function renderAll(){
+  populatePeopleSelects();
+  renderCarton();
+  renderStock();
+  renderBalances();
+  renderLedger();
+}
+
+function showToast(text){
+  const t = document.getElementById('toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+function openNamesModal(){
+  const wrap = document.getElementById('nameFields');
+  wrap.innerHTML = '';
+  state.people.forEach(name => addNameField(name));
+  document.getElementById('namesOverlay').classList.add('open');
+}
+function closeNamesModal(){
+  document.getElementById('namesOverlay').classList.remove('open');
+}
+function addNameField(value=''){
+  const wrap = document.getElementById('nameFields');
+  const row = document.createElement('div');
+  row.className = 'name-field';
+  row.innerHTML = `<input type="text" value="${value.replace(/"/g,'&quot;')}" placeholder="Name">
+    <button onclick="this.parentElement.remove()" title="Remove">✕</button>`;
+  wrap.appendChild(row);
+}
+function saveNames(){
+  const inputs = document.querySelectorAll('#nameFields input');
+  const names = Array.from(inputs).map(i=>i.value.trim()).filter(Boolean);
+  if(names.length===0){
+    showToast('Enter at least one name.');
+    return;
+  }
+  state.people = names;
+  closeNamesModal();
+  save();
+  showToast('Names updated.');
+}
+
+function toggleResetConfirm(show){
+  document.getElementById('resetConfirm').classList.toggle('open', show);
+}
+
+function resetAll(){
+  state = { people: state.people, batches: [], events: [], seq: 1 };
+  toggleResetConfirm(false);
+  save();
+  showToast('Ledger reset.');
+}
+
+function exportExcel(){
+  const wb = XLSX.utils.book_new();
+
+  const purchases = state.events.filter(e=>e.type==='buy').map(e=>({
+    Date: fmtDate(e.ts), Person: e.person, Eggs: e.qty, 'Amount (₹)': Math.round(e.amount*100)/100, Detail: e.detail
+  }));
+  const usages = state.events.filter(e=>e.type==='use').map(e=>({
+    Date: fmtDate(e.ts), Person: e.person, Eggs: e.qty, 'Cost (₹)': Math.round(e.amount*100)/100, Detail: e.detail
+  }));
+  const bal = computeBalances();
+  const balances = state.people.map(p=>{
+    const b = bal[p] || {paid:0,used:0};
+    return {Person:p, Paid: Math.round(b.paid*100)/100, Used: Math.round(b.used*100)/100, Net: Math.round((b.paid-b.used)*100)/100};
+  });
+  const stock = state.batches.filter(b=>b.remaining>0).map(b=>({
+    'Bought by': b.person, Remaining: b.remaining, 'Price/egg (₹)': Math.round(b.pricePerEgg*100)/100, Date: fmtDate(b.ts)
+  }));
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(purchases), 'Purchases');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(usages), 'Usage');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stock), 'Stock');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(balances), 'Balances');
+
+  XLSX.writeFile(wb, `egg-ledger-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function importExcel(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+      const purchases = wb.Sheets['Purchases'] ? XLSX.utils.sheet_to_json(wb.Sheets['Purchases']) : [];
+      const usages = wb.Sheets['Usage'] ? XLSX.utils.sheet_to_json(wb.Sheets['Usage']) : [];
+
+      const newState = { people: state.people, batches: [], events: [], seq: 1 };
+      const combined = [];
+      purchases.forEach(r=>combined.push({type:'buy', person:r.Person, qty:r.Eggs, amount:r['Amount (₹)'], detail:r.Detail||''}));
+      usages.forEach(r=>combined.push({type:'use', person:r.Person, qty:r.Eggs, amount:r['Cost (₹)'], detail:r.Detail||''}));
+
+      // Rebuild by replaying purchases first (creates batches), then usages (FIFO deduct), in original order given.
+      let ts = Date.now() - combined.length*1000;
+      combined.forEach(item=>{
+        if(item.type==='buy'){
+          const qty = Number(item.qty)||0;
+          const total = Number(item.amount)||0;
+          const pricePerEgg = qty>0 ? total/qty : 0;
+          newState.batches.push({id:newState.seq++, person:item.person, qty, remaining:qty, pricePerEgg, total, ts:ts});
+          newState.events.push({type:'buy', person:item.person, qty, amount:total, ts, detail:item.detail});
+        } else {
+          const qty = Number(item.qty)||0;
+          newState.events.push({type:'use', person:item.person, qty, amount:Number(item.amount)||0, ts, detail:item.detail});
+        }
+        ts += 1000;
+      });
+      // Recompute remaining stock via FIFO replay so it's internally consistent
+      const byTs = [...newState.batches].sort((a,b)=>a.ts-b.ts);
+      byTs.forEach(b=>b.remaining=b.qty);
+      const useEvents = newState.events.filter(e=>e.type==='use').sort((a,b)=>a.ts-b.ts);
+      useEvents.forEach(u=>{
+        let need = u.qty;
+        for(const b of byTs){
+          if(need<=0) break;
+          const take = Math.min(b.remaining, need);
+          b.remaining -= take;
+          need -= take;
+        }
+      });
+      if(!newState.people.length) newState.people = ['Person 1','Person 2','Person 3','Person 4','Person 5'];
+      state = newState;
+      save();
+      showToast('Ledger imported.');
+    }catch(err){
+      showToast('Could not read that file — make sure it was exported from this app.');
+    }
+    evt.target.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+document.getElementById('namesOverlay').addEventListener('click', function(e){
+  if(e.target === this) closeNamesModal();
+});
+
+renderAll();
+</script>
+</body>
+</html>
