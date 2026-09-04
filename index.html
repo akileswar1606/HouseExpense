@@ -38,15 +38,34 @@
   }
   .wrap{max-width:920px;margin:0 auto;padding:28px 20px 80px;}
 
+  /* ---- Setup / connection banners ---- */
+  .banner{
+    display:none;
+    align-items:center;
+    gap:10px;
+    padding:12px 16px;
+    border-radius:11px;
+    font-size:14px;
+    margin-bottom:18px;
+  }
+  .banner.show{display:flex;}
+  .banner.setup{background:#FBE9CE; border:1px solid var(--yolk-deep); color:#5C3D0A;}
+  .banner.offline{background:#F6DCD5; border:1px solid var(--brick); color:#7A2D1E;}
+  .banner code{background:rgba(0,0,0,.08); padding:1px 6px; border-radius:5px; font-family:'IBM Plex Mono',monospace; font-size:12.5px;}
+  .dot{width:8px; height:8px; border-radius:50%; flex-shrink:0;}
+  .status-line{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink-soft); margin-top:6px;}
+  .status-line .dot.live{background:var(--sage);}
+  .status-line .dot.down{background:var(--brick);}
+
   /* ---- Hero ---- */
   .hero{
     display:grid;
     grid-template-columns:1.1fr 1fr;
     gap:32px;
     align-items:center;
-    padding:36px 8px 44px;
+    padding:20px 8px 44px;
   }
-  @media (max-width:720px){ .hero{grid-template-columns:1fr; padding-top:20px;} }
+  @media (max-width:720px){ .hero{grid-template-columns:1fr; padding-top:10px;} }
   .hero h1{font-size:clamp(32px,5vw,46px); line-height:1.05;}
   .hero p{color:var(--ink-soft); font-size:16px; max-width:42ch;}
   .stat-row{display:flex; gap:28px; margin-top:22px; flex-wrap:wrap;}
@@ -82,7 +101,7 @@
 
   /* ---- Sections ---- */
   section{margin-top:10px;}
-  .panel-title{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px;}
+  .panel-title{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:8px;}
   .panel-title h2{font-size:22px;}
   .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
   @media (max-width:720px){ .grid-2{grid-template-columns:1fr;} }
@@ -118,9 +137,10 @@
     font-size:15px;
     font-weight:600;
     cursor:pointer;
-    transition:transform .08s ease;
+    transition:transform .08s ease, opacity .15s ease;
   }
   button:active{transform:scale(.98);}
+  button:disabled{opacity:.55; cursor:default;}
   .btn-buy{background:var(--sage); color:#fff;}
   .btn-use{background:var(--yolk); color:#3A2600;}
   .btn-ghost{
@@ -201,12 +221,20 @@
     position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
     background:var(--ink); color:#fff; padding:11px 18px; border-radius:9px; font-size:14px;
     opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:60;
+    max-width:90vw; text-align:center;
   }
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
 <div class="wrap">
+
+  <div class="banner setup" id="setupBanner">
+    ⚠️ This page isn't connected to a shared backend yet. Open <code>index.html</code>, find <code>APPS_SCRIPT_URL</code> near the top of the script, and paste in your deployed Google Apps Script URL. Until then, nothing will sync between devices.
+  </div>
+  <div class="banner offline" id="offlineBanner">
+    Can't reach the shared sheet right now — check your internet connection. Your last loaded data is still shown below.
+  </div>
 
   <div class="hero">
     <div>
@@ -217,6 +245,7 @@
         <div class="stat"><div class="num" id="statValue">₹0</div><div class="lbl">stock value</div></div>
         <div class="stat"><div class="num" id="statTxns">0</div><div class="lbl">entries logged</div></div>
       </div>
+      <div class="status-line"><span class="dot" id="connDot"></span><span id="connText">Connecting…</span></div>
     </div>
     <div class="carton">
       <div class="carton-grid" id="cartonGrid"></div>
@@ -239,7 +268,7 @@
           <input type="number" id="buyPrice" min="0" step="0.01" placeholder="80">
         </div>
       </div>
-      <button class="btn-buy" onclick="handleBuy()">Add to stock</button>
+      <button class="btn-buy" id="buyBtn" onclick="handleBuy()">Add to stock</button>
       <div class="msg" id="buyMsg"></div>
     </div>
 
@@ -249,7 +278,7 @@
       <select id="usePerson"></select>
       <label for="useQty">Eggs used</label>
       <input type="number" id="useQty" min="1" step="1" placeholder="8">
-      <button class="btn-use" onclick="handleUse()">Deduct from stock</button>
+      <button class="btn-use" id="useBtn" onclick="handleUse()">Deduct from stock</button>
       <div class="msg" id="useMsg"></div>
     </div>
   </section>
@@ -267,13 +296,24 @@
   <section>
     <div class="panel-title"><h2>Who's owed, who owes</h2></div>
     <div class="balances" id="balances"></div>
-    <p style="font-size:13px;color:var(--ink-soft);margin-top:10px;">Positive means the room owes them; negative means they owe the room. Settle up in cash or transfer, then it evens out over the next carton.</p>
+    <p style="font-size:13px;color:var(--ink-soft);margin-top:10px;">Positive means the room owes them; negative means they owe the room.</p>
+  </section>
+
+  <section>
+    <div class="panel-title"><h2>Settle up</h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Who pays</th><th></th><th>Who receives</th><th>Amount</th></tr></thead>
+        <tbody id="settleBody"></tbody>
+      </table>
+    </div>
   </section>
 
   <section>
     <div class="panel-title">
       <h2>Full ledger</h2>
       <div class="io-row">
+        <button class="btn-ghost" onclick="refreshState()">Refresh now</button>
         <button class="btn-ghost" onclick="exportExcel()">Export .xlsx</button>
         <label class="btn-ghost" style="cursor:pointer;">Import .xlsx
           <input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="importExcel(event)">
@@ -282,9 +322,9 @@
         <button class="btn-ghost" onclick="toggleResetConfirm(true)">Reset everything</button>
       </div>
       <div class="confirm-bar" id="resetConfirm">
-        <span>Clear all purchases, usage and balances?</span>
+        <span>Clear all purchases, usage and balances for everyone?</span>
         <button class="btn-secondary" onclick="toggleResetConfirm(false)">Cancel</button>
-        <button style="background:var(--brick); color:#fff;" onclick="resetAll()">Yes, reset</button>
+        <button style="background:var(--brick); color:#fff;" onclick="doReset()">Yes, reset</button>
       </div>
     </div>
     <div class="tbl-wrap">
@@ -296,7 +336,7 @@
   </section>
 
   <footer>
-    Stored in this browser automatically. Use <strong>Export .xlsx</strong> to keep a backup or move the ledger to another device — <strong>Import .xlsx</strong> loads it back.
+    Synced through a shared Google Sheet — changes on any device show up on the others within a few seconds, or tap <strong>Refresh now</strong>. <strong>Export .xlsx</strong> gives you a snapshot backup any time.
   </footer>
 </div>
 
@@ -315,22 +355,14 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const STORAGE_KEY = 'eggLedgerState_v1';
-let state = load();
+/* ============================================================
+   1. Paste your deployed Google Apps Script Web App URL below.
+      (Deploy -> New deployment -> Web app -> Anyone can access)
+   ============================================================ */
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzeypSv9s9nRC6H3hRXR-qsnagQk_0M3-FF0u0iqqOmdY59chtlJztanirweBM4s5ph/exec';
 
-function load(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if(raw) return JSON.parse(raw);
-  }catch(e){}
-  return {
-    people: ['Person 1','Person 2','Person 3','Person 4','Person 5'],
-    batches: [],
-    events: [],
-    seq: 1
-  };
-}
-function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); renderAll(); }
+let state = { people: ['Person 1','Person 2','Person 3','Person 4','Person 5'], batches: [], events: [] };
+let isConfigured = APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf('https://script.google.com') === 0;
 
 function fmtMoney(n){
   const r = Math.round(n*100)/100;
@@ -340,17 +372,55 @@ function fmtDate(ts){
   const d = new Date(ts);
   return d.toLocaleDateString(undefined,{day:'2-digit',month:'short'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
 }
-
-function populatePeopleSelects(){
-  ['buyPerson','usePerson'].forEach(id=>{
-    const sel = document.getElementById(id);
-    const prev = sel.value;
-    sel.innerHTML = state.people.map(p=>`<option value="${p}">${p}</option>`).join('');
-    if(state.people.includes(prev)) sel.value = prev;
-  });
+function showToast(text){
+  const t = document.getElementById('toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=>t.classList.remove('show'), 2800);
 }
 
-function handleBuy(){
+/* ---------------- API layer ---------------- */
+async function apiGet(){
+  const res = await fetch(APPS_SCRIPT_URL, { method:'GET' });
+  if(!res.ok) throw new Error('Server error (' + res.status + ')');
+  return res.json();
+}
+async function apiPost(payload){
+  // text/plain avoids a CORS preflight that Apps Script doesn't handle well
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method:'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  });
+  if(!res.ok) throw new Error('Server error (' + res.status + ')');
+  return res.json();
+}
+
+function setConn(status, text){
+  const dot = document.getElementById('connDot');
+  const label = document.getElementById('connText');
+  dot.className = 'dot ' + (status==='live' ? 'live' : 'down');
+  label.textContent = text;
+  document.getElementById('offlineBanner').classList.toggle('show', status==='down');
+}
+
+async function refreshState(){
+  if(!isConfigured) return;
+  try{
+    const data = await apiGet();
+    if(data.error) throw new Error(data.error);
+    state = data;
+    renderAll();
+    setConn('live', 'Live — synced with the shared sheet');
+  }catch(err){
+    setConn('down', "Can't reach the sheet — showing last known data");
+  }
+}
+
+/* ---------------- Actions ---------------- */
+async function handleBuy(){
+  if(!isConfigured) return;
   const person = document.getElementById('buyPerson').value;
   const qty = parseInt(document.getElementById('buyQty').value,10);
   const total = parseFloat(document.getElementById('buyPrice').value);
@@ -360,22 +430,27 @@ function handleBuy(){
     msg.className = 'msg err';
     return;
   }
-  const pricePerEgg = total/qty;
-  const batch = {
-    id: state.seq++,
-    person, qty, remaining: qty,
-    pricePerEgg, total, ts: Date.now()
-  };
-  state.batches.push(batch);
-  state.events.push({type:'buy', person, qty, amount:total, ts:batch.ts, detail:`${qty} eggs @ ${fmtMoney(pricePerEgg)}/egg`});
-  document.getElementById('buyQty').value='';
-  document.getElementById('buyPrice').value='';
-  msg.textContent = `Added ${qty} eggs at ${fmtMoney(pricePerEgg)} each.`;
-  msg.className = 'msg ok';
-  save();
+  const btn = document.getElementById('buyBtn');
+  btn.disabled = true; msg.textContent = 'Saving…'; msg.className = 'msg';
+  try{
+    const data = await apiPost({ action:'buy', person, qty, total });
+    if(data.error) throw new Error(data.error);
+    state = data;
+    renderAll();
+    document.getElementById('buyQty').value = '';
+    document.getElementById('buyPrice').value = '';
+    msg.textContent = `Added ${qty} eggs at ${fmtMoney(total/qty)} each.`;
+    msg.className = 'msg ok';
+  }catch(err){
+    msg.textContent = err.message || 'Could not save — check your connection.';
+    msg.className = 'msg err';
+  }finally{
+    btn.disabled = false;
+  }
 }
 
-function handleUse(){
+async function handleUse(){
+  if(!isConfigured) return;
   const person = document.getElementById('usePerson').value;
   const qty = parseInt(document.getElementById('useQty').value,10);
   const msg = document.getElementById('useMsg');
@@ -384,30 +459,64 @@ function handleUse(){
     msg.className = 'msg err';
     return;
   }
-  const available = state.batches.reduce((s,b)=>s+b.remaining,0);
-  if(qty > available){
-    msg.textContent = `Only ${available} eggs left in stock — log a purchase first.`;
+  const btn = document.getElementById('useBtn');
+  btn.disabled = true; msg.textContent = 'Saving…'; msg.className = 'msg';
+  try{
+    const data = await apiPost({ action:'use', person, qty });
+    if(data.error) throw new Error(data.error);
+    state = data;
+    renderAll();
+    document.getElementById('useQty').value = '';
+    msg.textContent = `${qty} eggs used.`;
+    msg.className = 'msg ok';
+  }catch(err){
+    msg.textContent = err.message || 'Could not save — check your connection.';
     msg.className = 'msg err';
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+async function doReset(){
+  toggleResetConfirm(false);
+  try{
+    const data = await apiPost({ action:'reset' });
+    if(data.error) throw new Error(data.error);
+    state = data;
+    renderAll();
+    showToast('Ledger reset for everyone.');
+  }catch(err){
+    showToast(err.message || 'Could not reset — check your connection.');
+  }
+}
+
+async function saveNames(){
+  const inputs = document.querySelectorAll('#nameFields input');
+  const names = Array.from(inputs).map(i=>i.value.trim()).filter(Boolean);
+  if(names.length===0){
+    showToast('Enter at least one name.');
     return;
   }
-  let remainingToDeduct = qty;
-  let totalCost = 0;
-  const breakdownParts = [];
-  const sortedBatches = [...state.batches].filter(b=>b.remaining>0).sort((a,b)=>a.ts-b.ts);
-  for(const b of sortedBatches){
-    if(remainingToDeduct<=0) break;
-    const take = Math.min(b.remaining, remainingToDeduct);
-    b.remaining -= take;
-    const subtotal = take * b.pricePerEgg;
-    totalCost += subtotal;
-    remainingToDeduct -= take;
-    breakdownParts.push(`${take} egg${take>1?'s':''} @ ${fmtMoney(b.pricePerEgg)} (${fmtMoney(subtotal)})`);
+  try{
+    const data = await apiPost({ action:'setNames', people: names });
+    if(data.error) throw new Error(data.error);
+    state = data;
+    closeNamesModal();
+    renderAll();
+    showToast('Names updated for everyone.');
+  }catch(err){
+    showToast(err.message || 'Could not save — check your connection.');
   }
-  state.events.push({type:'use', person, qty, amount:totalCost, ts:Date.now(), detail: breakdownParts.join(' + ')});
-  document.getElementById('useQty').value='';
-  msg.textContent = `${qty} eggs used, costing ${fmtMoney(totalCost)}.`;
-  msg.className = 'msg ok';
-  save();
+}
+
+/* ---------------- Rendering ---------------- */
+function populatePeopleSelects(){
+  ['buyPerson','usePerson'].forEach(id=>{
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = state.people.map(p=>`<option value="${p}">${p}</option>`).join('');
+    if(state.people.includes(prev)) sel.value = prev;
+  });
 }
 
 function computeBalances(){
@@ -424,10 +533,8 @@ function computeBalances(){
 function renderCarton(){
   const total = state.batches.reduce((s,b)=>s+b.remaining,0);
   const grid = document.getElementById('cartonGrid');
-  const cellsToShow = Math.max(12, Math.ceil(total/12)*12) || 12;
-  const filledCount = total % 12 === 0 && total > 0 ? 12 : total % 12;
+  const showFilled = total >= 12 ? 12 : total;
   let html = '';
-  const showFilled = total >= 12 ? 12 : filledCount;
   for(let i=0;i<12;i++){
     html += `<div class="cell ${i<showFilled ? 'filled':''}"></div>`;
   }
@@ -468,11 +575,55 @@ function renderBalances(){
     return `
       <div class="bal-card">
         <div class="who">${p}</div>
-        <div class="amt ${cls}">${net>=0?'+':'−'}${fmtMoney(Math.abs(net)).replace('₹','₹')}</div>
+        <div class="amt ${cls}">${net>=0?'+':'−'}${fmtMoney(Math.abs(net))}</div>
         <div class="sub">paid ${fmtMoney(b.paid)} · used ${fmtMoney(b.used)}</div>
       </div>
     `;
   }).join('');
+}
+
+// Greedy debt simplification: matches the biggest debtor against the
+// biggest creditor repeatedly, so P3 (who used ₹120 but paid nothing)
+// ends up paying P1 and P2 directly instead of everyone owing everyone.
+function computeSettlements(){
+  const bal = computeBalances();
+  const creditors = [], debtors = [];
+  state.people.forEach(p=>{
+    const b = bal[p] || {paid:0, used:0};
+    const net = b.paid - b.used;
+    if(net > 0.01) creditors.push({person:p, amt:net});
+    else if(net < -0.01) debtors.push({person:p, amt:-net});
+  });
+  creditors.sort((a,b)=>b.amt-a.amt);
+  debtors.sort((a,b)=>b.amt-a.amt);
+  const settlements = [];
+  let i=0, j=0;
+  while(i<debtors.length && j<creditors.length){
+    const d = debtors[i], c = creditors[j];
+    const amt = Math.min(d.amt, c.amt);
+    if(amt > 0.01) settlements.push({from:d.person, to:c.person, amount:amt});
+    d.amt -= amt; c.amt -= amt;
+    if(d.amt <= 0.01) i++;
+    if(c.amt <= 0.01) j++;
+  }
+  return settlements;
+}
+
+function renderSettlements(){
+  const body = document.getElementById('settleBody');
+  const settlements = computeSettlements();
+  if(settlements.length===0){
+    body.innerHTML = `<tr><td colspan="4" class="empty">Everyone's even — nothing to settle.</td></tr>`;
+    return;
+  }
+  body.innerHTML = settlements.map(s=>`
+    <tr>
+      <td class="name">${s.from}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; color:var(--ink-soft);">pays</td>
+      <td class="name">${s.to}</td>
+      <td>${fmtMoney(s.amount)}</td>
+    </tr>
+  `).join('');
 }
 
 function renderLedger(){
@@ -499,17 +650,11 @@ function renderAll(){
   renderCarton();
   renderStock();
   renderBalances();
+  renderSettlements();
   renderLedger();
 }
 
-function showToast(text){
-  const t = document.getElementById('toast');
-  t.textContent = text;
-  t.classList.add('show');
-  clearTimeout(showToast._h);
-  showToast._h = setTimeout(()=>t.classList.remove('show'), 2600);
-}
-
+/* ---------------- Names modal ---------------- */
 function openNamesModal(){
   const wrap = document.getElementById('nameFields');
   wrap.innerHTML = '';
@@ -527,33 +672,16 @@ function addNameField(value=''){
     <button onclick="this.parentElement.remove()" title="Remove">✕</button>`;
   wrap.appendChild(row);
 }
-function saveNames(){
-  const inputs = document.querySelectorAll('#nameFields input');
-  const names = Array.from(inputs).map(i=>i.value.trim()).filter(Boolean);
-  if(names.length===0){
-    showToast('Enter at least one name.');
-    return;
-  }
-  state.people = names;
-  closeNamesModal();
-  save();
-  showToast('Names updated.');
-}
-
 function toggleResetConfirm(show){
   document.getElementById('resetConfirm').classList.toggle('open', show);
 }
+document.getElementById('namesOverlay').addEventListener('click', function(e){
+  if(e.target === this) closeNamesModal();
+});
 
-function resetAll(){
-  state = { people: state.people, batches: [], events: [], seq: 1 };
-  toggleResetConfirm(false);
-  save();
-  showToast('Ledger reset.');
-}
-
+/* ---------------- Excel export / import ---------------- */
 function exportExcel(){
   const wb = XLSX.utils.book_new();
-
   const purchases = state.events.filter(e=>e.type==='buy').map(e=>({
     Date: fmtDate(e.ts), Person: e.person, Eggs: e.qty, 'Amount (₹)': Math.round(e.amount*100)/100, Detail: e.detail
   }));
@@ -568,75 +696,54 @@ function exportExcel(){
   const stock = state.batches.filter(b=>b.remaining>0).map(b=>({
     'Bought by': b.person, Remaining: b.remaining, 'Price/egg (₹)': Math.round(b.pricePerEgg*100)/100, Date: fmtDate(b.ts)
   }));
-
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(purchases), 'Purchases');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(usages), 'Usage');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stock), 'Stock');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(balances), 'Balances');
-
   XLSX.writeFile(wb, `egg-ledger-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 function importExcel(evt){
   const file = evt.target.files[0];
   if(!file) return;
+  if(!isConfigured){ showToast('Connect the shared sheet first (see the setup banner).'); evt.target.value=''; return; }
   const reader = new FileReader();
-  reader.onload = function(e){
+  reader.onload = async function(e){
     try{
       const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
       const purchases = wb.Sheets['Purchases'] ? XLSX.utils.sheet_to_json(wb.Sheets['Purchases']) : [];
       const usages = wb.Sheets['Usage'] ? XLSX.utils.sheet_to_json(wb.Sheets['Usage']) : [];
-
-      const newState = { people: state.people, batches: [], events: [], seq: 1 };
       const combined = [];
-      purchases.forEach(r=>combined.push({type:'buy', person:r.Person, qty:r.Eggs, amount:r['Amount (₹)'], detail:r.Detail||''}));
-      usages.forEach(r=>combined.push({type:'use', person:r.Person, qty:r.Eggs, amount:r['Cost (₹)'], detail:r.Detail||''}));
+      purchases.forEach(r=>combined.push({type:'buy', person:r.Person, qty:Number(r.Eggs), total:Number(r['Amount (₹)'])}));
+      usages.forEach(r=>combined.push({type:'use', person:r.Person, qty:Number(r.Eggs)}));
 
-      // Rebuild by replaying purchases first (creates batches), then usages (FIFO deduct), in original order given.
-      let ts = Date.now() - combined.length*1000;
-      combined.forEach(item=>{
+      showToast(`Importing ${combined.length} entries…`);
+      for(const item of combined){
         if(item.type==='buy'){
-          const qty = Number(item.qty)||0;
-          const total = Number(item.amount)||0;
-          const pricePerEgg = qty>0 ? total/qty : 0;
-          newState.batches.push({id:newState.seq++, person:item.person, qty, remaining:qty, pricePerEgg, total, ts:ts});
-          newState.events.push({type:'buy', person:item.person, qty, amount:total, ts, detail:item.detail});
+          await apiPost({ action:'buy', person:item.person, qty:item.qty, total:item.total });
         } else {
-          const qty = Number(item.qty)||0;
-          newState.events.push({type:'use', person:item.person, qty, amount:Number(item.amount)||0, ts, detail:item.detail});
+          await apiPost({ action:'use', person:item.person, qty:item.qty });
         }
-        ts += 1000;
-      });
-      // Recompute remaining stock via FIFO replay so it's internally consistent
-      const byTs = [...newState.batches].sort((a,b)=>a.ts-b.ts);
-      byTs.forEach(b=>b.remaining=b.qty);
-      const useEvents = newState.events.filter(e=>e.type==='use').sort((a,b)=>a.ts-b.ts);
-      useEvents.forEach(u=>{
-        let need = u.qty;
-        for(const b of byTs){
-          if(need<=0) break;
-          const take = Math.min(b.remaining, need);
-          b.remaining -= take;
-          need -= take;
-        }
-      });
-      if(!newState.people.length) newState.people = ['Person 1','Person 2','Person 3','Person 4','Person 5'];
-      state = newState;
-      save();
-      showToast('Ledger imported.');
+      }
+      await refreshState();
+      showToast('Import complete.');
     }catch(err){
-      showToast('Could not read that file — make sure it was exported from this app.');
+      showToast('Could not import — make sure it was exported from this app.');
     }
     evt.target.value = '';
   };
   reader.readAsArrayBuffer(file);
 }
 
-document.getElementById('namesOverlay').addEventListener('click', function(e){
-  if(e.target === this) closeNamesModal();
-});
-
-renderAll();
+/* ---------------- Boot ---------------- */
+document.getElementById('setupBanner').classList.toggle('show', !isConfigured);
+if(!isConfigured){
+  setConn('down', 'Not connected — see the setup notice above');
+  renderAll();
+} else {
+  refreshState();
+  setInterval(refreshState, 6000);
+}
 </script>
 </body>
 </html>
