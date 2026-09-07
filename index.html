@@ -303,7 +303,7 @@
     <div class="panel-title"><h2>Settle up</h2></div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Who pays</th><th></th><th>Who receives</th><th>Amount</th></tr></thead>
+        <thead><tr><th>Who pays</th><th></th><th>Who receives</th><th>Amount</th><th></th></tr></thead>
         <tbody id="settleBody"></tbody>
       </table>
     </div>
@@ -352,6 +352,20 @@
   </div>
 </div>
 
+<div class="overlay" id="pinOverlay">
+  <div class="modal">
+    <h3>Confirm payment</h3>
+    <p style="font-size:14px; color:var(--ink-soft); margin:-6px 0 14px;" id="pinContext"></p>
+    <label for="pinInput">Enter PIN</label>
+    <input type="password" id="pinInput" inputmode="numeric" placeholder="••••" maxlength="8" onkeydown="if(event.key==='Enter') submitPin()">
+    <div class="msg err" id="pinMsg"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closePinModal()">Cancel</button>
+      <button class="btn-buy" onclick="submitPin()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -361,7 +375,15 @@
    ============================================================ */
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzeypSv9s9nRC6H3hRXR-qsnagQk_0M3-FF0u0iqqOmdY59chtlJztanirweBM4s5ph/exec';
 
-let state = { people: ['Person 1','Person 2','Person 3','Person 4','Person 5'], batches: [], events: [] };
+/* ============================================================
+   Change this PIN to whatever your room agrees on. It's a simple
+   friction step (stops accidental taps), NOT real security — anyone
+   who views the page source can see it, so don't rely on it to
+   stop a determined person.
+   ============================================================ */
+const SETTLE_PIN = '1234';
+
+let state = { people: ['Person 1','Person 2','Person 3','Person 4','Person 5'], batches: [], events: [], settlements: [] };
 let isConfigured = APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf('https://script.google.com') === 0;
 
 function fmtMoney(n){
@@ -521,13 +543,23 @@ function populatePeopleSelects(){
 
 function computeBalances(){
   const bal = {};
-  state.people.forEach(p=>bal[p]={paid:0, used:0});
+  state.people.forEach(p=>bal[p]={paid:0, used:0, settledOut:0, settledIn:0});
   state.events.forEach(e=>{
-    if(!bal[e.person]) bal[e.person] = {paid:0, used:0};
+    if(!bal[e.person]) bal[e.person] = {paid:0, used:0, settledOut:0, settledIn:0};
     if(e.type==='buy') bal[e.person].paid += e.amount;
     else bal[e.person].used += e.amount;
   });
+  (state.settlements||[]).forEach(s=>{
+    if(!bal[s.from]) bal[s.from] = {paid:0, used:0, settledOut:0, settledIn:0};
+    if(!bal[s.to]) bal[s.to] = {paid:0, used:0, settledOut:0, settledIn:0};
+    bal[s.from].settledOut += s.amount;
+    bal[s.to].settledIn += s.amount;
+  });
   return bal;
+}
+function netBalance(b){
+  // paying down a debt raises your net; receiving a settlement lowers your net
+  return b.paid - b.used + b.settledOut - b.settledIn;
 }
 
 function renderCarton(){
@@ -569,9 +601,9 @@ function renderBalances(){
   const bal = computeBalances();
   const wrap = document.getElementById('balances');
   wrap.innerHTML = state.people.map(p=>{
-    const b = bal[p] || {paid:0, used:0};
-    const net = b.paid - b.used;
-    const cls = net > 0.001 ? 'pos' : net < -0.001 ? 'neg' : 'zero';
+    const b = bal[p] || {paid:0, used:0, settledOut:0, settledIn:0};
+    const net = netBalance(b);
+    const cls = net > 0.01 ? 'pos' : net < -0.01 ? 'neg' : 'zero';
     return `
       <div class="bal-card">
         <div class="who">${p}</div>
@@ -589,10 +621,10 @@ function computeSettlements(){
   const bal = computeBalances();
   const creditors = [], debtors = [];
   state.people.forEach(p=>{
-    const b = bal[p] || {paid:0, used:0};
-    const net = b.paid - b.used;
-    if(net > 0.01) creditors.push({person:p, amt:net});
-    else if(net < -0.01) debtors.push({person:p, amt:-net});
+    const b = bal[p] || {paid:0, used:0, settledOut:0, settledIn:0};
+    const net = netBalance(b);
+    if(net > 0.5) creditors.push({person:p, amt:net});
+    else if(net < -0.5) debtors.push({person:p, amt:-net});
   });
   creditors.sort((a,b)=>b.amt-a.amt);
   debtors.sort((a,b)=>b.amt-a.amt);
@@ -601,10 +633,10 @@ function computeSettlements(){
   while(i<debtors.length && j<creditors.length){
     const d = debtors[i], c = creditors[j];
     const amt = Math.min(d.amt, c.amt);
-    if(amt > 0.01) settlements.push({from:d.person, to:c.person, amount:amt});
+    if(amt > 0.5) settlements.push({from:d.person, to:c.person, amount:Math.round(amt*100)/100});
     d.amt -= amt; c.amt -= amt;
-    if(d.amt <= 0.01) i++;
-    if(c.amt <= 0.01) j++;
+    if(d.amt <= 0.5) i++;
+    if(c.amt <= 0.5) j++;
   }
   return settlements;
 }
@@ -613,22 +645,67 @@ function renderSettlements(){
   const body = document.getElementById('settleBody');
   const settlements = computeSettlements();
   if(settlements.length===0){
-    body.innerHTML = `<tr><td colspan="4" class="empty">Everyone's even — nothing to settle.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="empty">Everyone's even — nothing to settle.</td></tr>`;
     return;
   }
-  body.innerHTML = settlements.map(s=>`
+  body.innerHTML = settlements.map((s,idx)=>`
     <tr>
       <td class="name">${s.from}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif; color:var(--ink-soft);">pays</td>
       <td class="name">${s.to}</td>
       <td>${fmtMoney(s.amount)}</td>
+      <td><button class="btn-ghost" style="padding:6px 10px; font-size:12.5px;" onclick='openPinModal(${JSON.stringify(s)})'>Mark as paid</button></td>
     </tr>
   `).join('');
 }
 
+/* ---------------- PIN-gated "mark as paid" ---------------- */
+let pendingSettlement = null;
+function openPinModal(settlement){
+  pendingSettlement = settlement;
+  document.getElementById('pinContext').textContent =
+    `${settlement.from} pays ${settlement.to} ${fmtMoney(settlement.amount)}`;
+  document.getElementById('pinInput').value = '';
+  document.getElementById('pinMsg').textContent = '';
+  document.getElementById('pinOverlay').classList.add('open');
+  setTimeout(()=>document.getElementById('pinInput').focus(), 50);
+}
+function closePinModal(){
+  document.getElementById('pinOverlay').classList.remove('open');
+  pendingSettlement = null;
+}
+async function submitPin(){
+  const entered = document.getElementById('pinInput').value.trim();
+  const msg = document.getElementById('pinMsg');
+  if(entered !== SETTLE_PIN){
+    msg.textContent = 'Wrong PIN — try again.';
+    document.getElementById('pinInput').value = '';
+    document.getElementById('pinInput').focus();
+    return;
+  }
+  if(!pendingSettlement) { closePinModal(); return; }
+  const s = pendingSettlement;
+  closePinModal();
+  try{
+    const data = await apiPost({ action:'settle', from:s.from, to:s.to, amount:s.amount });
+    if(data.error) throw new Error(data.error);
+    state = data;
+    renderAll();
+    showToast(`Marked ${s.from} → ${s.to} (${fmtMoney(s.amount)}) as paid.`);
+  }catch(err){
+    showToast(err.message || 'Could not save — check your connection.');
+  }
+}
+document.getElementById('pinOverlay').addEventListener('click', function(e){
+  if(e.target === this) closePinModal();
+});
+
 function renderLedger(){
   const body = document.getElementById('ledgerBody');
-  const events = [...state.events].sort((a,b)=>b.ts-a.ts);
+  const settleEvents = (state.settlements||[]).map(s=>({
+    type:'settle', person:`${s.from} → ${s.to}`, qty:'—', amount:s.amount, ts:s.timestamp, detail:'Marked as paid'
+  }));
+  const events = [...state.events, ...settleEvents].sort((a,b)=>b.ts-a.ts);
   if(events.length===0){
     body.innerHTML = `<tr><td colspan="6" class="empty">Nothing logged yet — add a purchase to get started.</td></tr>`;
     return;
@@ -636,7 +713,7 @@ function renderLedger(){
   body.innerHTML = events.map(e=>`
     <tr>
       <td>${fmtDate(e.ts)}</td>
-      <td>${e.type==='buy' ? 'Bought' : 'Used'}</td>
+      <td>${e.type==='buy' ? 'Bought' : e.type==='use' ? 'Used' : 'Settled'}</td>
       <td class="name">${e.person}</td>
       <td>${e.qty}</td>
       <td>${fmtMoney(e.amount)}</td>
@@ -742,7 +819,7 @@ if(!isConfigured){
   renderAll();
 } else {
   refreshState();
-  setInterval(refreshState, 6000);
+  setInterval(refreshState, 2500);
 }
 </script>
 </body>
