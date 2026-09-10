@@ -127,6 +127,10 @@
   }
   select:focus, input:focus{outline:2px solid var(--yolk); outline-offset:1px;}
   .row2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .checklist{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;}
+  .check-pill{display:flex; align-items:center; gap:7px; border:1px solid var(--line); border-radius:20px; padding:8px 13px; font-size:14px; cursor:pointer; background:var(--bg-warm); transition:background .12s ease, border-color .12s ease;}
+  .check-pill input{width:auto; margin:0; accent-color:var(--yolk-deep);}
+  .check-pill.checked{background:#FBEBC7; border-color:var(--yolk-deep); font-weight:500;}
   button{
     margin-top:18px;
     width:100%;
@@ -273,13 +277,28 @@
     </div>
 
     <div class="card">
-      <h3>Log usage</h3>
+      <h3>Log usage — one person</h3>
       <label for="usePerson">Used by</label>
       <select id="usePerson"></select>
       <label for="useQty">Eggs used</label>
       <input type="number" id="useQty" min="1" step="1" placeholder="8">
       <button class="btn-use" id="useBtn" onclick="handleUse()">Deduct from stock</button>
       <div class="msg" id="useMsg"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h3>Cooked & shared — splits the cost equally</h3>
+      <p style="font-size:13.5px; color:var(--ink-soft); margin:-8px 0 14px;">For dishes like egg fried rice or egg semiya that a few people eat together.</p>
+      <label for="sharedDish">What was made <span style="color:var(--ink-soft); font-weight:400;">(optional)</span></label>
+      <input type="text" id="sharedDish" placeholder="Egg fried rice">
+      <label for="sharedQty">Eggs used</label>
+      <input type="number" id="sharedQty" min="1" step="1" placeholder="5">
+      <label>Who ate it</label>
+      <div class="checklist" id="sharedPeopleList"></div>
+      <button class="btn-use" id="sharedBtn" onclick="handleSharedUse()">Split cost equally</button>
+      <div class="msg" id="sharedMsg"></div>
     </div>
   </section>
 
@@ -383,7 +402,7 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzeypSv9s9nRC6H
    ============================================================ */
 const SETTLE_PIN = '1234';
 
-let state = { people: ['Person 1','Person 2','Person 3','Person 4','Person 5'], batches: [], events: [], settlements: [] };
+let state = { people: ['Person 1','Person 2','Person 3','Person 4','Person 5'], batches: [], events: [], settlements: [], sharedUsage: [] };
 let isConfigured = APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf('https://script.google.com') === 0;
 
 function fmtMoney(n){
@@ -499,6 +518,46 @@ async function handleUse(){
   }
 }
 
+async function handleSharedUse(){
+  if(!isConfigured) return;
+  const dish = document.getElementById('sharedDish').value.trim();
+  const qty = parseInt(document.getElementById('sharedQty').value,10);
+  const chosen = Array.from(document.querySelectorAll('#sharedPeopleList input:checked')).map(i=>i.value);
+  const msg = document.getElementById('sharedMsg');
+  if(!qty || qty<=0){
+    msg.textContent = 'Enter how many eggs were used.';
+    msg.className = 'msg err';
+    return;
+  }
+  if(chosen.length===0){
+    msg.textContent = 'Select at least one person who ate it.';
+    msg.className = 'msg err';
+    return;
+  }
+  const btn = document.getElementById('sharedBtn');
+  btn.disabled = true; msg.textContent = 'Saving…'; msg.className = 'msg';
+  try{
+    const data = await apiPost({ action:'sharedUse', dish, people:chosen, qty });
+    if(data.error) throw new Error(data.error);
+    state = data;
+    renderAll();
+    document.getElementById('sharedDish').value = '';
+    document.getElementById('sharedQty').value = '';
+    document.querySelectorAll('#sharedPeopleList input:checked').forEach(cb=>{
+      cb.checked = false;
+      cb.closest('.check-pill').classList.remove('checked');
+    });
+    const share = (data.sharedUsage && data.sharedUsage.length) ? data.sharedUsage[data.sharedUsage.length-1].perPersonShare : 0;
+    msg.textContent = `${qty} eggs split among ${chosen.length} — ${fmtMoney(share)} each.`;
+    msg.className = 'msg ok';
+  }catch(err){
+    msg.textContent = err.message || 'Could not save — check your connection.';
+    msg.className = 'msg err';
+  }finally{
+    btn.disabled = false;
+  }
+}
+
 async function doReset(){
   toggleResetConfirm(false);
   try{
@@ -539,19 +598,40 @@ function populatePeopleSelects(){
     sel.innerHTML = state.people.map(p=>`<option value="${p}">${p}</option>`).join('');
     if(state.people.includes(prev)) sel.value = prev;
   });
+  renderSharedPeopleList();
+}
+
+function renderSharedPeopleList(){
+  const wrap = document.getElementById('sharedPeopleList');
+  const previouslyChecked = new Set(
+    Array.from(wrap.querySelectorAll('input:checked')).map(i=>i.value)
+  );
+  wrap.innerHTML = state.people.map(p=>`
+    <label class="check-pill ${previouslyChecked.has(p) ? 'checked' : ''}">
+      <input type="checkbox" value="${p}" ${previouslyChecked.has(p) ? 'checked' : ''}
+        onchange="this.closest('.check-pill').classList.toggle('checked', this.checked)">
+      ${p}
+    </label>
+  `).join('');
 }
 
 function computeBalances(){
   const bal = {};
-  state.people.forEach(p=>bal[p]={paid:0, used:0, settledOut:0, settledIn:0});
+  const ensure = p => { if(!bal[p]) bal[p] = {paid:0, used:0, settledOut:0, settledIn:0}; };
+  state.people.forEach(ensure);
   state.events.forEach(e=>{
-    if(!bal[e.person]) bal[e.person] = {paid:0, used:0, settledOut:0, settledIn:0};
+    ensure(e.person);
     if(e.type==='buy') bal[e.person].paid += e.amount;
     else bal[e.person].used += e.amount;
   });
+  (state.sharedUsage||[]).forEach(s=>{
+    s.people.forEach(p=>{
+      ensure(p);
+      bal[p].used += s.perPersonShare;
+    });
+  });
   (state.settlements||[]).forEach(s=>{
-    if(!bal[s.from]) bal[s.from] = {paid:0, used:0, settledOut:0, settledIn:0};
-    if(!bal[s.to]) bal[s.to] = {paid:0, used:0, settledOut:0, settledIn:0};
+    ensure(s.from); ensure(s.to);
     bal[s.from].settledOut += s.amount;
     bal[s.to].settledIn += s.amount;
   });
@@ -577,7 +657,7 @@ function renderCarton(){
     `${total} eggs on hand`;
   document.getElementById('statEggs').textContent = total;
   document.getElementById('statValue').textContent = fmtMoney(state.batches.reduce((s,b)=>s+b.remaining*b.pricePerEgg,0));
-  document.getElementById('statTxns').textContent = state.events.length;
+  document.getElementById('statTxns').textContent = state.events.length + (state.sharedUsage||[]).length;
 }
 
 function renderStock(){
@@ -705,7 +785,11 @@ function renderLedger(){
   const settleEvents = (state.settlements||[]).map(s=>({
     type:'settle', person:`${s.from} → ${s.to}`, qty:'—', amount:s.amount, ts:s.timestamp, detail:'Marked as paid'
   }));
-  const events = [...state.events, ...settleEvents].sort((a,b)=>b.ts-a.ts);
+  const sharedEvents = (state.sharedUsage||[]).map(s=>({
+    type:'shared', person: s.people.join(', '), qty:s.qty, amount:s.totalCost, ts:s.timestamp,
+    detail: `${s.detail}${s.dish ? ' · ' + s.dish : ''} · ${fmtMoney(s.perPersonShare)} each`
+  }));
+  const events = [...state.events, ...settleEvents, ...sharedEvents].sort((a,b)=>b.ts-a.ts);
   if(events.length===0){
     body.innerHTML = `<tr><td colspan="6" class="empty">Nothing logged yet — add a purchase to get started.</td></tr>`;
     return;
@@ -713,7 +797,7 @@ function renderLedger(){
   body.innerHTML = events.map(e=>`
     <tr>
       <td>${fmtDate(e.ts)}</td>
-      <td>${e.type==='buy' ? 'Bought' : e.type==='use' ? 'Used' : 'Settled'}</td>
+      <td>${e.type==='buy' ? 'Bought' : e.type==='use' ? 'Used' : e.type==='shared' ? 'Shared meal' : 'Settled'}</td>
       <td class="name">${e.person}</td>
       <td>${e.qty}</td>
       <td>${fmtMoney(e.amount)}</td>
