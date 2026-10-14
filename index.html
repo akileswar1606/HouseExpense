@@ -734,6 +734,55 @@ function renderBalances(){
   }).join('');
 }
 
+
+function computeBalances() {
+  const bal = {};
+
+  const ensure = person => {
+    if (!bal[person]) {
+      bal[person] = {
+        paid: 0,
+        used: 0,
+        settledOut: 0,
+        settledIn: 0
+      };
+    }
+  };
+
+  (state.people || []).forEach(ensure);
+
+  // Purchases count in full, including unused eggs.
+  (state.events || []).forEach(e => {
+    ensure(e.person);
+
+    if (e.type === 'buy') {
+      bal[e.person].paid += Number(e.amount) || 0;
+    } else if (e.type === 'use') {
+      bal[e.person].used += Number(e.amount) || 0;
+    }
+  });
+
+  // Shared meals: charge each participant their share.
+  (state.sharedUsage || []).forEach(s => {
+    (s.people || []).forEach(person => {
+      ensure(person);
+      bal[person].used += Number(s.perPersonShare) || 0;
+    });
+  });
+
+  // Record completed settlements.
+  (state.settlements || []).forEach(s => {
+    ensure(s.from);
+    ensure(s.to);
+
+    bal[s.from].settledOut += Number(s.amount) || 0;
+    bal[s.to].settledIn += Number(s.amount) || 0;
+  });
+
+  return bal;
+}
+
+
 // Greedy debt simplification: matches the biggest debtor against the
 // biggest creditor repeatedly, so P3 (who used ₹120 but paid nothing)
 // ends up paying P1 and P2 directly instead of everyone owing everyone.
