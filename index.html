@@ -677,9 +677,9 @@ function computeSettlements() {
   return settlements;
 }
   
-function netBalance(b){
-  // paying down a debt raises your net; receiving a settlement lowers your net
-  return b.paid - b.used + b.settledOut - b.settledIn;
+
+function netBalance(b) {
+  return -b.used + b.settledOut - b.settledIn;
 }
 
 function renderCarton(){
@@ -735,12 +735,14 @@ function renderBalances(){
 }
 
 
+
 function computeBalances() {
-  const bal = {};
+  const balances = {};
 
   const ensure = person => {
-    if (!bal[person]) {
-      bal[person] = {
+    if (!person) return;
+    if (!balances[person]) {
+      balances[person] = {
         paid: 0,
         used: 0,
         settledOut: 0,
@@ -751,36 +753,114 @@ function computeBalances() {
 
   (state.people || []).forEach(ensure);
 
-  // Purchases count in full, including unused eggs.
+  // Total purchases are retained for display.
+  // They are NOT directly used as the settlement credit:
+  // unused eggs are still inventory, not consumed expenses.
   (state.events || []).forEach(e => {
     ensure(e.person);
+    if (!e.person) return;
 
     if (e.type === 'buy') {
-      bal[e.person].paid += Number(e.amount) || 0;
-    } else if (e.type === 'use') {
-      bal[e.person].used += Number(e.amount) || 0;
+      balances[e.person].paid += Number(e.amount) || 0;
     }
   });
 
-  // Shared meals: charge each participant their share.
-  (state.sharedUsage || []).forEach(s => {
-    (s.people || []).forEach(person => {
-      ensure(person);
-      bal[person].used += Number(s.perPersonShare) || 0;
+  // Replay purchases and consumption in chronological order.
+  const purchases = (state.events || [])
+    .filter(e => e.type === 'buy')
+    .map(e => ({
+      person: e.person,
+      qty: Number(e.qty) || 0,
+      pricePerEgg: e.qty ? (Number(e.amount) || 0) / Number(e.qty) : 0,
+      ts: Number(e.ts) || 0
+    }));
+
+  const consumptions = [
+    ...(state.events || [])
+      .filter(e => e.type === 'use')
+      .map(e => ({
+        person: e.person,
+        qty: Number(e.qty) || 0,
+        ts: Number(e.ts) || 0,
+        people: [e.person]
+      })),
+    ...(state.sharedUsage || []).map(s => ({
+      qty: Number(s.qty) || 0,
+      ts: Number(s.timestamp) || 0,
+      people: s.people || [],
+      perPersonShare: Number(s.perPersonShare) || 0
+    }))
+  ].sort((a, b) => a.ts - b.ts);
+
+  purchases.sort((a, b) => a.ts - b.ts);
+
+  const batches = purchases.map(p => ({
+    ...p,
+    remaining: p.qty
+  }));
+
+  consumptions.forEach(use => {
+    let need = use.qty;
+    let totalCost = 0;
+    const allocations = [];
+
+    for (const batch of batches) {
+      if (need <= 0) break;
+
+      const take = Math.min(batch.remaining, need);
+      if (take <= 0) continue;
+
+      const cost = take * batch.pricePerEgg;
+      batch.remaining -= take;
+      need -= take;
+      totalCost += cost;
+
+      allocations.push({
+        buyer: batch.person,
+        cost
+      });
+    }
+
+    if (need > 0) {
+      console.warn('Usage exceeds available stock:', use);
+    }
+
+    // Credit the people who bought the eggs actually consumed.
+    allocations.forEach(a => {
+      ensure(a.buyer);
+      if (balances[a.buyer]) {
+        balances[a.buyer].used -= a.cost;
+      }
     });
+
+    // Charge the people who consumed those eggs.
+    if (use.people.length === 1 && use.people[0]) {
+      ensure(use.people[0]);
+      balances[use.people[0]].used += totalCost;
+    } else if (use.people.length > 1) {
+      const share = totalCost / use.people.length;
+      use.people.forEach(person => {
+        ensure(person);
+        if (balances[person]) balances[person].used += share;
+      });
+    }
   });
 
-  // Record completed settlements.
+  // Apply completed payments.
   (state.settlements || []).forEach(s => {
     ensure(s.from);
     ensure(s.to);
-
-    bal[s.from].settledOut += Number(s.amount) || 0;
-    bal[s.to].settledIn += Number(s.amount) || 0;
+    if (balances[s.from]) {
+      balances[s.from].settledOut += Number(s.amount) || 0;
+    }
+    if (balances[s.to]) {
+      balances[s.to].settledIn += Number(s.amount) || 0;
+    }
   });
 
-  return bal;
+  return balances;
 }
+
 
 
 function renderSettlements(){
