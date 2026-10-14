@@ -617,58 +617,66 @@ function renderSharedPeopleList(){
 
 
 
-function computeBalances() {
-  const bal = {};
 
-  const ensure = p => {
-    if (!bal[p]) {
-      bal[p] = {
-        paid: 0,
-        used: 0,
-        settledOut: 0,
-        settledIn: 0
-      };
-    }
-  };
+function computeSettlements() {
+  const bal = computeBalances();
+  const creditors = [];
+  const debtors = [];
 
-  // Initialize balances for everyone.
-  state.people.forEach(ensure);
+  // Preserve the people order for creditors:
+  // Madasamy first, then Andeesh, etc.
+  state.people.forEach(person => {
+    const b = bal[person] || {
+      paid: 0,
+      used: 0,
+      settledOut: 0,
+      settledIn: 0
+    };
 
-  // Count full purchase amounts and individual usage.
-  state.events.forEach(e => {
-    ensure(e.person);
+    const net = Math.round(netBalance(b) * 100) / 100;
 
-    if (e.type === 'buy') {
-      bal[e.person].paid += Number(e.amount) || 0;
-    } else if (e.type === 'use') {
-      bal[e.person].used += Number(e.amount) || 0;
+    if (net > 0.01) {
+      creditors.push({ person, amt: net });
+    } else if (net < -0.01) {
+      debtors.push({ person, amt: -net });
     }
   });
 
-  // Split shared meal costs equally among those who ate.
-  (state.sharedUsage || []).forEach(s => {
-    (s.people || []).forEach(p => {
-      ensure(p);
-      bal[p].used += Number(s.perPersonShare) || 0;
-    });
-  });
+  // Handle the largest debts first.
+  debtors.sort((a, b) => b.amt - a.amt);
 
-  // Account for payments already settled.
-  (state.settlements || []).forEach(s => {
-    ensure(s.from);
-    ensure(s.to);
+  // IMPORTANT: Do not sort creditors by amount.
+  // Their state.people order determines payment priority.
+  const settlements = [];
+  let i = 0;
+  let j = 0;
 
-    bal[s.from].settledOut += Number(s.amount) || 0;
-    bal[s.to].settledIn += Number(s.amount) || 0;
-  });
+  while (i < debtors.length && j < creditors.length) {
+    const d = debtors[i];
+    const c = creditors[j];
 
-  return bal;
+    const amount = Math.round(
+      Math.min(d.amt, c.amt) * 100
+    ) / 100;
+
+    if (amount > 0) {
+      settlements.push({
+        from: d.person,
+        to: c.person,
+        amount
+      });
+    }
+
+    d.amt = Math.round((d.amt - amount) * 100) / 100;
+    c.amt = Math.round((c.amt - amount) * 100) / 100;
+
+    if (d.amt <= 0.01) i++;
+    if (c.amt <= 0.01) j++;
+  }
+
+  return settlements;
 }
-
-function netBalance(b) {
-  return b.paid - b.used + b.settledOut - b.settledIn;
-}
-
+  
 function netBalance(b){
   // paying down a debt raises your net; receiving a settlement lowers your net
   return b.paid - b.used + b.settledOut - b.settledIn;
