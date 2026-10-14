@@ -616,6 +616,7 @@ function renderSharedPeopleList(){
 }
 
 
+
 function computeBalances() {
   const bal = {};
 
@@ -630,35 +631,25 @@ function computeBalances() {
     }
   };
 
+  // Initialize balances for everyone.
   state.people.forEach(ensure);
 
-  // Record purchases and individual usage.
+  // Count full purchase amounts and individual usage.
   state.events.forEach(e => {
     ensure(e.person);
 
     if (e.type === 'buy') {
-      bal[e.person].paid += e.amount;
+      bal[e.person].paid += Number(e.amount) || 0;
     } else if (e.type === 'use') {
-      bal[e.person].used += e.amount;
+      bal[e.person].used += Number(e.amount) || 0;
     }
   });
 
-  // Credit only the value of eggs already consumed.
-  // Unused eggs remain the purchaser's stock value.
-  (state.batches || []).forEach(batch => {
-    ensure(batch.person);
-
-    const remainingValue =
-      batch.remaining * batch.pricePerEgg;
-
-    bal[batch.person].paid -= remainingValue;
-  });
-
-  // Split shared meals among the people who ate them.
+  // Split shared meal costs equally among those who ate.
   (state.sharedUsage || []).forEach(s => {
-    s.people.forEach(p => {
+    (s.people || []).forEach(p => {
       ensure(p);
-      bal[p].used += s.perPersonShare;
+      bal[p].used += Number(s.perPersonShare) || 0;
     });
   });
 
@@ -667,11 +658,15 @@ function computeBalances() {
     ensure(s.from);
     ensure(s.to);
 
-    bal[s.from].settledOut += s.amount;
-    bal[s.to].settledIn += s.amount;
+    bal[s.from].settledOut += Number(s.amount) || 0;
+    bal[s.to].settledIn += Number(s.amount) || 0;
   });
 
   return bal;
+}
+
+function netBalance(b) {
+  return b.paid - b.used + b.settledOut - b.settledIn;
 }
 
 function netBalance(b){
